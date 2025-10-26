@@ -14,7 +14,7 @@ pathlib.Path(fig_dir).mkdir(parents=True, exist_ok=True)
 spark = SparkSession.builder.appName("NBADataReduction").getOrCreate()
 
 # Load integrated dataset
-df = spark.read.csv("clean_output/integrated_nba_stats", header=True, inferSchema=True)
+df = spark.read.csv("/home/sat3812/clean_output/integrated_nba_stats", header=True, inferSchema=True)
 
 
 # Select numeric columns and impute remaining nulls with mean
@@ -92,3 +92,4 @@ print(f"PCA components retained (≥95% variance): {num_keep if num_cols else 0}
 print("Visualizations saved in:", fig_dir)
 
 spark.stop()
+
