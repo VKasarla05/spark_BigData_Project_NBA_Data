@@ -14,7 +14,7 @@ pathlib.Path(fig_dir).mkdir(parents=True, exist_ok=True)
 spark = SparkSession.builder.appName("NBADataTransformation").getOrCreate()
 
 # Load Reduced Dataset
-df = spark.read.csv("clean_output/reduced_nba_stats", header=True, inferSchema=True)
+df = spark.read.csv("/home/sat3812/reduced_nba_stats", header=True, inferSchema=True)
 
 # Identify numeric and categorical columns
 num_cols = [c for c, t in df.dtypes if t in ("double", "float", "int", "bigint")]
@@ -88,3 +88,4 @@ print(f"Output saved to: {output_path}")
 print(f"Visualizations saved in: {fig_dir}")
 
 spark.stop()
+
