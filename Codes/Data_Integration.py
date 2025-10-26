@@ -12,9 +12,9 @@ pathlib.Path(fig_dir).mkdir(parents=True, exist_ok=True)
 spark = SparkSession.builder.appName("NBADataIntegration").getOrCreate()
 
 # Load cleaned datasets
-players_df  = spark.read.csv("clean_output/clean_players_csv", header=True, inferSchema=True)
-player_data = spark.read.csv("clean_output/clean_player_data", header=True, inferSchema=True)
-seasons_df  = spark.read.csv("clean_output/clean_seasons_stats", header=True, inferSchema=True)
+players_df  = spark.read.csv("/home/sat3812/clean_output/clean_players_csv", header=True, inferSchema=True)
+player_data = spark.read.csv("/home/sat3812/clean_output/clean_player_data", header=True, inferSchema=True)
+seasons_df  = spark.read.csv("/home/sat3812/clean_output/clean_seasons_stats", header=True, inferSchema=True)
 
 # Normalize player names
 normalize = F.udf(lambda s: s.lower().strip() if s else None)
@@ -72,3 +72,4 @@ print(f"Dropped due to correlation: {len(to_drop) if safe_cols else 0}")
 print(f"Visuals saved in: {fig_dir}")
 
 spark.stop()
+
