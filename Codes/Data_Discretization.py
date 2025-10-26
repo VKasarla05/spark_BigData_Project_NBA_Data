@@ -15,7 +15,7 @@ pathlib.Path(fig_dir).mkdir(parents=True, exist_ok=True)
 spark = SparkSession.builder.appName("NBADataDiscretization_Fast").getOrCreate()
 
 # Load Transformed Dataset (sample only 25% for testing)
-df = spark.read.csv("clean_output/transformed_nba_stats", header=True, inferSchema=True)
+df = spark.read.csv("/home/sat3812/transformed_nba_stats", header=True, inferSchema=True)
 df = df.sample(fraction=0.25, seed=42) 
 
 num_cols = [c for c, t in df.dtypes if t in ("double", "float", "int", "bigint")]
@@ -86,3 +86,4 @@ print(f"Output Path: {output_path}")
 print(f"Figures saved to: {fig_dir}")
 
 spark.stop()
+
