@@ -11,9 +11,9 @@ import pathlib
 sns.set_palette("pastel")
 
 # Paths
-players_path       = "Players.csv"
-player_data_path   = "player_data.csv"
-seasons_path       = "Seasons_Stats.csv"
+players_path       = "/home/sat3812/BD_Project/data/Players.csv"
+player_data_path   = "/home/sat3812/BD_Project/data/player_data.csv"
+seasons_path       = "/home/sat3812/BD_Project/data/Seasons_Stats.csv"
 clean_players_dir  = "clean_output/clean_players_csv"
 clean_player_data_dir = "clean_output/clean_player_data"
 clean_seasons_dir  = "clean_output/clean_seasons_stats"
@@ -153,3 +153,4 @@ print("Seasons_Stats rows:", seasons_df.count())
 print("Cleaning complete.  Cleaned data saved.  Figures saved in", figures_dir)
 
 spark.stop()
+
