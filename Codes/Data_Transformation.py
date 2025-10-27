@@ -13,16 +13,16 @@ pathlib.Path(fig_dir).mkdir(parents=True, exist_ok=True)
 
 spark = SparkSession.builder.appName("NBADataTransformation").getOrCreate()
 
-# Load Reduced Dataset
+# Loading Dataset
 df = spark.read.csv("/home/sat3812/reduced_nba_stats", header=True, inferSchema=True)
 
-# Identify numeric and categorical columns
+# Identifying numeric and categorical columns
 num_cols = [c for c, t in df.dtypes if t in ("double", "float", "int", "bigint")]
 cat_cols = [c for c, t in df.dtypes if t == "string" and c != "name_norm"]
 
 print(f"Numeric columns: {len(num_cols)} | Categorical columns: {len(cat_cols)}")
 
-# Numeric Transformation (MinMax + Standard Scaling)
+# Numeric Transformation 
 assembler = VectorAssembler(inputCols=num_cols, outputCol="features_vec", handleInvalid="keep")
 df = assembler.transform(df)
 
@@ -38,14 +38,14 @@ df = std_scaler.fit(df).transform(df)
 df = df.withColumn("minmax_array", vector_to_array("features_minmax")) \
        .withColumn("standard_array", vector_to_array("features_standard"))
 
-# Categorical Encoding (Index + One-Hot)
+# Categorical Encoding
 for c in cat_cols[:3]:
     indexer = StringIndexer(inputCol=c, outputCol=f"{c}_idx", handleInvalid="skip")
     encoder = OneHotEncoder(inputCol=f"{c}_idx", outputCol=f"{c}_ohe")
     df = indexer.fit(df).transform(df)
     df = encoder.fit(df).transform(df)
 
-# Visualizations – Before & After Scaling
+# Visualizations 
 if num_cols:
     col_name = num_cols[0]
     sample_pdf = df.select(col_name).dropna().sample(fraction=0.05, seed=42).toPandas()
@@ -67,14 +67,7 @@ if num_cols:
     plt.close()
 
 # Drop Unsupported Columns Before Saving
-drop_cols = [
-    "features_vec",
-    "features_minmax",
-    "features_standard",
-    "minmax_array",
-    "standard_array",
-] + [c for c in df.columns if c.endswith("_ohe")]
-
+drop_cols = [ "features_vec","features_minmax","features_standard","minmax_array","standard_array",] + [c for c in df.columns if c.endswith("_ohe")]
 df = df.drop(*[c for c in drop_cols if c in df.columns])
 
 # Save Transformed Dataset
@@ -88,4 +81,5 @@ print(f"Output saved to: {output_path}")
 print(f"Visualizations saved in: {fig_dir}")
 
 spark.stop()
+
 
