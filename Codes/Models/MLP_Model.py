@@ -17,11 +17,11 @@ import os
 spark = SparkSession.builder.appName("NBA_MLP_Classification").getOrCreate()
 
 # Load Dataset
-data_path = "/content/discretized_nba_stats/discretized_nba_stats/part-*.csv"
+data_path = "/home/sat3812/discretized_nba_stats/part-*.csv"
 nba_data = spark.read.csv(data_path, header=True, inferSchema=True)
 print(f"Dataset loaded: {nba_data.count()} rows, {len(nba_data.columns)} columns")
 # Create results folder
-results_dir = "/home/hduser/BigDataProject/Results"
+results_dir = "/home/sat3812/BD_Project/Codes/Models/Visualizations"
 os.makedirs(results_dir, exist_ok=True)
 print(f"Results will be saved in: {results_dir}")
 
@@ -107,11 +107,7 @@ results_df = pd.DataFrame({
 })
 
 print("\nClassification Performance:")
-display(
-    results_df.style
-    .background_gradient(cmap="Purples")
-    .format(subset=["Accuracy", "Precision", "Recall", "AUC"], formatter="{:.3f}")
-)
+print(results_df.to_string(index=False))
 
 # Confusion Matrix Visualization
 preds_pd = predictions.select("label", "prediction").toPandas()
