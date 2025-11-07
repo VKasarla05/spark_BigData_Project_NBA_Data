@@ -11,6 +11,7 @@ from pyspark.ml.classification import MultilayerPerceptronClassifier
 from pyspark.ml.evaluation import MulticlassClassificationEvaluator, BinaryClassificationEvaluator
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 import time
+import os
 
 # Start Spark Session
 spark = SparkSession.builder.appName("NBA_MLP_Classification").getOrCreate()
@@ -19,6 +20,10 @@ spark = SparkSession.builder.appName("NBA_MLP_Classification").getOrCreate()
 data_path = "/content/discretized_nba_stats/discretized_nba_stats/part-*.csv"
 nba_data = spark.read.csv(data_path, header=True, inferSchema=True)
 print(f"Dataset loaded: {nba_data.count()} rows, {len(nba_data.columns)} columns")
+# Create results folder
+results_dir = "/home/hduser/BigDataProject/Results"
+os.makedirs(results_dir, exist_ok=True)
+print(f"Results will be saved in: {results_dir}")
 
 # Feature Preparation
 # Identify target variable containing "PER"
@@ -68,8 +73,10 @@ plt.xlabel("PER Value", fontsize=12)
 plt.ylabel("Player Count", fontsize=12)
 plt.legend()
 plt.tight_layout()
-plt.show()
-
+per_plot_path = os.path.join(results_dir, "PER_Distribution.png")
+plt.savefig(per_plot_path, dpi=300)
+plt.close()
+print(f"PER distribution plot saved at: {per_plot_path}")
 # Train MLP Neural Network Classifier
 network_layers = [len(feature_columns), 20, 10, 2]
 mlp_classifier = MultilayerPerceptronClassifier(
@@ -113,4 +120,7 @@ disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=["Below Avg", 
 disp.plot(cmap="Oranges")
 plt.title("MLP Classification Confusion Matrix", fontsize=14, weight='bold')
 plt.tight_layout()
-plt.show()
+cm_plot_path = os.path.join(results_dir, "Confusion_Matrix.png")
+plt.savefig(cm_plot_path, dpi=300)
+plt.close()
+print(f"Confusion matrix saved at: {cm_plot_path}")
