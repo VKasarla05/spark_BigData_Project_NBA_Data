@@ -26,7 +26,7 @@ import seaborn as sns
 
 
 ATHLETE_STATISTICS_FILE_PATTERN = "/home/sat3812/discretized_nba_stats/part-*.csv"
-PERFORMANCE_OUTPUT_DIRECTORY = "/content/"
+PERFORMANCE_OUTPUT_DIRECTORY = "/home/sat3812/BD_Project/Codes/Models/Visualizations"
 TRAINING_DATASET_FRACTION = 0.8
 TESTING_DATASET_FRACTION = 0.2
 RANDOM_REPRODUCTION_SEED = 42
@@ -38,7 +38,7 @@ TARGET_METRIC_CANDIDATES = ["ss_PER_quantile", "ss_PER", "PER"]
 
 # Distributed Computing Environment Initialization
 distributed_compute_engine = DistributedComputeEngine.builder.appName(
-    "DecisionTree_Athletic_Classification"
+    "NBA_DT_Classification"
 ).getOrCreate()
 print("Distributed computing environment initialized successfully")
 
