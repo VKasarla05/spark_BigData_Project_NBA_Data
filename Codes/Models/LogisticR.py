@@ -31,14 +31,14 @@ spark = SparkSession.builder.appName("NBA_LogisticRegression_Classification").ge
 # =========================================================
 # Load Dataset
 # =========================================================
-data_path = "/content/discretized_nba_stats/discretized_nba_stats/part-*.csv"
+data_path = "/home/sat3812/discretized_nba_stats/part-*.csv"
 df = spark.read.csv(data_path, header=True, inferSchema=True)
 print(f"Loading dataset...\n✓ Loaded {df.count()} rows with {len(df.columns)} columns")
 
 # =========================================================
 # Results Directory
 # =========================================================
-results_dir = "/content/Results/Logistic/"
+results_dir = "/home/sat3812/BD_Project/Codes/Models/Visualizations"
 os.makedirs(results_dir, exist_ok=True)
 print(f"Results will be saved to: {results_dir}")
 
@@ -130,7 +130,7 @@ results_df = pd.DataFrame({
 })
 
 print("\nClassification Performance Summary:")
-print(results_df.round(4))
+print(results_df.to_string(index=False,justify='center'))
 results_df.to_csv(os.path.join(results_dir, "LogisticRegression_Results.csv"), index=False)
 
 # =========================================================
@@ -195,5 +195,4 @@ final_preds = predictions_fixed.select(
 
 # Save clean CSV
 final_preds.write.mode("overwrite").csv(os.path.join(results_dir, "Predictions_LR"), header=True)
-
 
