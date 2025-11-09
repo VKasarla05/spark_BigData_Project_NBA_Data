@@ -25,7 +25,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 
-ATHLETE_STATISTICS_FILE_PATTERN = "/content/discretized_nba_stats/discretized_nba_stats/part-*.csv"
+ATHLETE_STATISTICS_FILE_PATTERN = "/home/sat3812/discretized_nba_stats/part-*.csv"
 PERFORMANCE_OUTPUT_DIRECTORY = "/content/"
 TRAINING_DATASET_FRACTION = 0.8
 TESTING_DATASET_FRACTION = 0.2
