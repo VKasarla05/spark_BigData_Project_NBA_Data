@@ -23,14 +23,14 @@ from datetime import datetime
 spark = SparkSession.builder.appName("NBA_RF_Classification").getOrCreate()
 
 # Load Dataset
-data_path = "/content/discretized_nba_stats/discretized_nba_stats/part-*.csv"
+data_path = "/home/sat3812/discretized_nba_stats/part-*.csv"
 nba_data = spark.read.csv(data_path, header=True, inferSchema=True)
 print(f"Dataset loaded: {nba_data.count()} rows, {len(nba_data.columns)} columns")
 
 # =========================================================
 # Folder Setup for Results
 # =========================================================
-results_dir = f"/home/sat3812/BD_Project/Results/RandomForest"
+results_dir = f"/home/sat3812/BD_Project/Codes/Models/Visualizations"
 os.makedirs(results_dir, exist_ok=True)
 print(f"Results will be saved to: {results_dir}")
 
@@ -77,7 +77,7 @@ plt.axvline(average_per, linestyle='--', linewidth=2, color='red', label=f'Thres
 plt.title("Player Efficiency Rating (PER) Distribution", fontsize=14, weight='bold')
 plt.xlabel("PER Value"); plt.ylabel("Player Count"); plt.legend()
 plt.tight_layout()
-plt.savefig(os.path.join(results_dir, "PER_Distribution.png"))
+plt.savefig(os.path.join(results_dir, "PER_Distribution_RF.png"))
 plt.close()
 
 # =========================================================
@@ -121,7 +121,7 @@ results_df = pd.DataFrame({
 })
 
 print("\nClassification Performance:")
-print(results_df.round(3))
+print(results_df.to_string(index=False,justify='center'))
 
 # Save metrics
 metrics_path = os.path.join(results_dir, "RF_Classification_Results.csv")
@@ -137,7 +137,7 @@ disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=["Below Avg", 
 disp.plot(cmap="Greens")
 plt.title("Random Forest Classification Confusion Matrix", fontsize=14, weight='bold')
 plt.tight_layout()
-plt.savefig(os.path.join(results_dir, "Confusion_Matrix.png"))
+plt.savefig(os.path.join(results_dir, "Confusion_Matrix_RF.png"))
 plt.close()
 
 # =========================================================
@@ -158,7 +158,7 @@ plt.plot([0,1], [0,1], linestyle="--", color='gray')
 plt.xlabel("False Positive Rate"); plt.ylabel("True Positive Rate")
 plt.title("ROC Curve — Random Forest"); plt.legend(loc="lower right")
 plt.tight_layout()
-plt.savefig(os.path.join(results_dir, "ROC_Curve.png"))
+plt.savefig(os.path.join(results_dir, "ROC_Curve_RF.png"))
 plt.close()
 
 # Precision–Recall Curve
@@ -168,6 +168,5 @@ plt.xlabel("Recall"); plt.ylabel("Precision")
 plt.title("Precision–Recall Curve — Random Forest")
 plt.legend(loc="lower left")
 plt.tight_layout()
-plt.savefig(os.path.join(results_dir, "Precision_Recall_Curve.png"))
+plt.savefig(os.path.join(results_dir, "Precision_Recall_Curve_RF.png"))
 plt.close()
-
