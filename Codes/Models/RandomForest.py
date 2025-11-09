@@ -1,172 +1,323 @@
+#=========================================================
+# Random Forest Model
 # =========================================================
-# Spark Random Forest Classification Model for NBA Player Efficiency
-# =========================================================
-
 # Import Libraries
-from pyspark.sql import SparkSession
-from pyspark.sql import functions as F
-from pyspark.ml.feature import VectorAssembler, StandardScaler
-from pyspark.ml.classification import RandomForestClassifier
-from pyspark.ml.evaluation import MulticlassClassificationEvaluator, BinaryClassificationEvaluator
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, roc_curve, precision_recall_curve, roc_auc_score, average_precision_score
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-import time
+# =========================================================
 import os
-from datetime import datetime
+import time as execution_timer
+from pyspark.sql import SparkSession as ClusterCompute
+from pyspark.sql import functions as dataframe_utilities
+from pyspark.ml.feature import VectorAssembler as ColumnAggregator
+from pyspark.ml.feature import StandardScaler as FeatureNormalizer
+from pyspark.ml.classification import RandomForestClassifier as TreeBasedClassifier
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator as CategoryMetrics
+from pyspark.ml.evaluation import BinaryClassificationEvaluator as TwoClassMetrics
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+from sklearn.metrics import roc_curve, precision_recall_curve
+from sklearn.metrics import roc_auc_score, average_precision_score
+import pandas as data_table_library
+import matplotlib.pyplot as chart_generator
+import seaborn as stats_visualizer
+
+# Data Path
+PLAYER_STATS_FILE_PATTERN = "/content/discretized_nba_stats/discretized_nba_stats/part-*.csv"
+OUTPUT_ARTIFACTS_FOLDER = "/content/"
+
+TRAIN_SPLIT_PERCENTAGE = 0.8
+TEST_SPLIT_PERCENTAGE = 0.2
+RANDOM_NUMBER_SEED = 42
+NUMBER_OF_DECISION_TREES = 200
+MAXIMUM_TREE_DEPTH = 12
+FEATURE_SELECTION_METHOD = "auto"
 
 # =========================================================
-# Spark Session
+# Initializing Distributed Processing Engine
 # =========================================================
-spark = SparkSession.builder.appName("NBA_RF_Classification").getOrCreate()
-
-# Load Dataset
-data_path = "/home/sat3812/discretized_nba_stats/part-*.csv"
-nba_data = spark.read.csv(data_path, header=True, inferSchema=True)
-print(f"Dataset loaded: {nba_data.count()} rows, {len(nba_data.columns)} columns")
+distributed_compute_engine = ClusterCompute.builder.appName("RF_Basketball_Classifier").getOrCreate()
+print("Distributed processing engine initialized")
 
 # =========================================================
-# Folder Setup for Results
+# Load Player Performance Dataset
 # =========================================================
-results_dir = f"/home/sat3812/BD_Project/Codes/Models/Visualizations"
-os.makedirs(results_dir, exist_ok=True)
-print(f"Results will be saved to: {results_dir}")
+basketball_metrics_dataframe = distributed_compute_engine.read.csv(
+    PLAYER_STATS_FILE_PATTERN,
+    header=True,
+    inferSchema=True
+)
+number_of_players = basketball_metrics_dataframe.count()
+number_of_metrics = len(basketball_metrics_dataframe.columns)
+print(f"Data loaded successfully: {number_of_players} player records, {number_of_metrics} statistical measures")
 
 # =========================================================
-# Feature Preparation
+# Output Path
 # =========================================================
-target = [col for col in nba_data.columns if "PER" in col.upper()][0]
-print(f"Target variable selected: {target}")
+os.makedirs(OUTPUT_ARTIFACTS_FOLDER, exist_ok=True)
+print(f"Output location configured: {OUTPUT_ARTIFACTS_FOLDER}")
 
-feature_columns = [
-    col for col, dtype in nba_data.dtypes
-    if dtype in ("int", "double", "float", "bigint") and col != target
+# =========================================================
+# Identify Target Performance Metric
+# =========================================================
+efficiency_rating_columns = [
+    col_identifier for col_identifier in basketball_metrics_dataframe.columns
+    if "PER" in col_identifier.upper()
 ]
+if not efficiency_rating_columns:
+    raise RuntimeError("Player efficiency rating column not found")
 
-assembler = VectorAssembler(inputCols=feature_columns, outputCol="raw_features")
-data_with_features = assembler.transform(nba_data.na.drop(subset=[target]))
-
-scaler = StandardScaler(inputCol="raw_features", outputCol="features", withMean=True, withStd=True)
-scaled_data = scaler.fit(data_with_features).transform(data_with_features)
+target_efficiency_column = efficiency_rating_columns[0]
+print(f"Target performance metric identified: {target_efficiency_column}")
 
 # =========================================================
-# Binary Label Creation (Based on Average PER)
+# Extract Numerical Feature Set
 # =========================================================
-average_per = nba_data.select(F.mean(F.col(target))).collect()[0][0]
-print(f"Average PER (classification threshold): {average_per:.2f}")
+numeric_predictor_columns = []
+for column_identifier, column_datatype in basketball_metrics_dataframe.dtypes:
+    if column_datatype in ("int", "double", "float", "bigint"):
+        if column_identifier != target_efficiency_column:
+            numeric_predictor_columns.append(column_identifier)
 
-labeled_data = nba_data.withColumn(
+print(f"Number of numerical predictors: {len(numeric_predictor_columns)}")
+
+# =========================================================
+# Calculate Performance Threshold
+# =========================================================
+average_efficiency_score = basketball_metrics_dataframe.select(
+    dataframe_utilities.mean(dataframe_utilities.col(target_efficiency_column))
+).first()[0]
+print(f"Performance threshold (average): {average_efficiency_score:.2f}")
+
+# =========================================================
+# Generate Binary Classification Labels
+# =========================================================
+dataset_with_binary_labels = basketball_metrics_dataframe.withColumn(
     "label",
-    F.when(F.col(target) >= average_per, 1).otherwise(0)
+    dataframe_utilities.when(
+        dataframe_utilities.col(target_efficiency_column) >= average_efficiency_score, 1
+    ).otherwise(0)
 )
 
-data_with_features = assembler.transform(labeled_data.na.drop(subset=[target]))
-scaled_classification_data = scaler.fit(data_with_features).transform(data_with_features).select("features", "label")
-train_data, test_data = scaled_classification_data.randomSplit([0.8, 0.2], seed=42)
-print(f"Train set: {train_data.count()} | Test set: {test_data.count()}")
+# =========================================================
+# Prepare Feature Vectors
+# =========================================================
+dataset_without_missing = dataset_with_binary_labels.na.drop(subset=[target_efficiency_column])
+
+column_aggregation_tool = ColumnAggregator(
+    inputCols=numeric_predictor_columns,
+    outputCol="raw_features"
+)
+dataset_with_feature_vectors = column_aggregation_tool.transform(dataset_without_missing)
 
 # =========================================================
-# Visualize PER Distribution with Threshold
+# Apply Feature Standardization
 # =========================================================
-per_distribution = nba_data.select(target).toPandas()
-plt.figure(figsize=(9, 5))
-sns.histplot(per_distribution[target], bins=35, kde=True, edgecolor='black', color='teal')
-plt.axvline(average_per, linestyle='--', linewidth=2, color='red', label=f'Threshold = {average_per:.2f}')
-plt.title("Player Efficiency Rating (PER) Distribution", fontsize=14, weight='bold')
-plt.xlabel("PER Value"); plt.ylabel("Player Count"); plt.legend()
-plt.tight_layout()
-plt.savefig(os.path.join(results_dir, "PER_Distribution_RF.png"))
-plt.close()
+feature_normalization_tool = FeatureNormalizer( inputCol="raw_features",outputCol="features",withMean=True,withStd=True)
+normalization_model_fitted = feature_normalization_tool.fit(dataset_with_feature_vectors)
+dataset_with_normalized_features = normalization_model_fitted.transform(dataset_with_feature_vectors)
+final_modeling_dataset = dataset_with_normalized_features.select("features", "label")
 
 # =========================================================
-# Train Random Forest Classifier
+# Split into Training and Testing Sets
 # =========================================================
-rf = RandomForestClassifier(
+training_dataset, testing_dataset = final_modeling_dataset.randomSplit( [TRAIN_SPLIT_PERCENTAGE, TEST_SPLIT_PERCENTAGE],seed=RANDOM_NUMBER_SEED)
+num_training_samples = training_dataset.count()
+num_testing_samples = testing_dataset.count()
+print(f"Data partitioned: {num_training_samples} training samples, {num_testing_samples} test samples")
+
+# =========================================================
+# Visualize Performance Distribution
+# =========================================================
+efficiency_distribution_data = basketball_metrics_dataframe.select(target_efficiency_column).toPandas()
+
+chart_generator.figure(figsize=(9, 5))
+stats_visualizer.histplot(
+    efficiency_distribution_data[target_efficiency_column],
+    bins=35,
+    kde=True,
+    edgecolor='black',
+    color='teal'
+)
+chart_generator.axvline(
+    average_efficiency_score,
+    linestyle='--',
+    linewidth=2,
+    color='red',
+    label=f'Threshold = {average_efficiency_score:.2f}'
+)
+chart_generator.title("Player Efficiency Rating (PER) Distribution", fontsize=14, weight='bold')
+chart_generator.xlabel("PER Value")
+chart_generator.ylabel("Player Count")
+chart_generator.legend()
+chart_generator.tight_layout()
+distribution_chart_path = os.path.join(OUTPUT_ARTIFACTS_FOLDER, "PER_Distribution_RF.png")
+chart_generator.savefig(distribution_chart_path)
+chart_generator.close()
+print("Distribution chart created")
+
+# =========================================================
+# Configure Tree Ensemble Model
+# =========================================================
+tree_ensemble_model = TreeBasedClassifier(
     featuresCol="features",
     labelCol="label",
     probabilityCol="probability",
     rawPredictionCol="rawPrediction",
     predictionCol="prediction",
-    numTrees=200,
-    maxDepth=12,
-    seed=42,
-    featureSubsetStrategy="auto"
+    numTrees=NUMBER_OF_DECISION_TREES,
+    maxDepth=MAXIMUM_TREE_DEPTH,
+    seed=RANDOM_NUMBER_SEED,
+    featureSubsetStrategy=FEATURE_SELECTION_METHOD
 )
 
-start_time = time.time()
-rf_model = rf.fit(train_data)
-predictions = rf_model.transform(test_data).cache()
-training_time = time.time() - start_time
-print(f"Training completed in {training_time:.2f} seconds")
+# =========================================================
+# Execute Model Training
+# =========================================================
+model_training_start = execution_timer.time()
+trained_tree_ensemble = tree_ensemble_model.fit(training_dataset)
+model_training_duration = execution_timer.time() - model_training_start
+print(f"Model training completed in {model_training_duration:.2f} seconds")
 
 # =========================================================
-# Evaluate Model Performance
+# Generate Test Predictions
 # =========================================================
-accuracy_eval  = MulticlassClassificationEvaluator(labelCol="label", predictionCol="prediction", metricName="accuracy")
-precision_eval = MulticlassClassificationEvaluator(labelCol="label", predictionCol="prediction", metricName="weightedPrecision")
-recall_eval    = MulticlassClassificationEvaluator(labelCol="label", predictionCol="prediction", metricName="weightedRecall")
-f1_eval        = MulticlassClassificationEvaluator(labelCol="label", predictionCol="prediction", metricName="f1")
-auc_eval       = BinaryClassificationEvaluator(labelCol="label", rawPredictionCol="rawPrediction", metricName="areaUnderROC")
+test_set_predictions = trained_tree_ensemble.transform(testing_dataset).cache()
 
-results_df = pd.DataFrame({
+# =========================================================
+# Calculate Performance Metrics
+# =========================================================
+accuracy_metric_calculator = CategoryMetrics(
+    labelCol="label",
+    predictionCol="prediction",
+    metricName="accuracy"
+)
+precision_metric_calculator = CategoryMetrics(
+    labelCol="label",
+    predictionCol="prediction",
+    metricName="weightedPrecision"
+)
+recall_metric_calculator = CategoryMetrics(
+    labelCol="label",
+    predictionCol="prediction",
+    metricName="weightedRecall"
+)
+f1_metric_calculator = CategoryMetrics(
+    labelCol="label",
+    predictionCol="prediction",
+    metricName="f1"
+)
+auc_metric_calculator = TwoClassMetrics(
+    labelCol="label",
+    rawPredictionCol="rawPrediction",
+    metricName="areaUnderROC"
+)
+
+calculated_accuracy = accuracy_metric_calculator.evaluate(test_set_predictions)
+calculated_precision = precision_metric_calculator.evaluate(test_set_predictions)
+calculated_recall = recall_metric_calculator.evaluate(test_set_predictions)
+calculated_f1_score = f1_metric_calculator.evaluate(test_set_predictions)
+calculated_auc_score = auc_metric_calculator.evaluate(test_set_predictions)
+
+# =========================================================
+# Display and Save Results
+# =========================================================
+print("\nModel Performance Summary:")
+performance_metrics_table = data_table_library.DataFrame({
     "Model": ["Random Forest Classifier"],
-    "Accuracy":  [accuracy_eval.evaluate(predictions)],
-    "Precision": [precision_eval.evaluate(predictions)],
-    "Recall":    [recall_eval.evaluate(predictions)],
-    "F1":        [f1_eval.evaluate(predictions)],
-    "AUC":       [auc_eval.evaluate(predictions)],
-    "Training_Time(s)": [training_time]
+    "Accuracy": [calculated_accuracy],
+    "Precision": [calculated_precision],
+    "Recall": [calculated_recall],
+    "F1": [calculated_f1_score],
+    "AUC": [calculated_auc_score],
+    "Training_Time(s)": [model_training_duration]
 })
+print(performance_metrics_table.to_string(index=False, justify='center'))
 
-print("\nClassification Performance:")
-print(results_df.to_string(index=False,justify='center'))
-
-# Save metrics
-metrics_path = os.path.join(results_dir, "RF_Classification_Results.csv")
-results_df.to_csv(metrics_path, index=False)
-print(f"Results saved to: {metrics_path}")
+metrics_output_file = os.path.join(OUTPUT_ARTIFACTS_FOLDER, "RF_Classification_Results.csv")
+performance_metrics_table.to_csv(metrics_output_file, index=False)
+print(f"Metrics saved: {metrics_output_file}")
 
 # =========================================================
-# Confusion Matrix Visualization
+# Create Confusion Matrix Visualization
 # =========================================================
-preds_pd = predictions.select("label", "prediction").toPandas()
-cm = confusion_matrix(preds_pd["label"], preds_pd["prediction"])
-disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=["Below Avg", "Above/Equal Avg"])
-disp.plot(cmap="Greens")
-plt.title("Random Forest Classification Confusion Matrix", fontsize=14, weight='bold')
-plt.tight_layout()
-plt.savefig(os.path.join(results_dir, "Confusion_Matrix_RF.png"))
-plt.close()
+true_vs_predicted_labels = test_set_predictions.select("label", "prediction").toPandas()
+classification_error_matrix = confusion_matrix(
+    true_vs_predicted_labels["label"],
+    true_vs_predicted_labels["prediction"]
+)
+
+matrix_visualization_object = ConfusionMatrixDisplay(
+    confusion_matrix=classification_error_matrix,
+    display_labels=["Below Avg", "Above/Equal Avg"]
+)
+matrix_visualization_object.plot(cmap="Greens")
+chart_generator.title("Random Forest Classification Confusion Matrix", fontsize=14, weight='bold')
+chart_generator.tight_layout()
+confusion_matrix_file = os.path.join(OUTPUT_ARTIFACTS_FOLDER, "Confusion_Matrix_RF.png")
+chart_generator.savefig(confusion_matrix_file)
+chart_generator.close()
+print("Confusion matrix chart saved")
 
 # =========================================================
-# ROC & Precision–Recall Curves
+# Create ROC Curve Visualization
 # =========================================================
-prob_pd = predictions.select("label", "probability").toPandas()
-pos_scores = prob_pd["probability"].apply(lambda v: float(v[1]))
+probability_predictions_table = test_set_predictions.select("label", "probability").toPandas()
+class_one_probability_scores = probability_predictions_table["probability"].apply(lambda v: float(v[1]))
 
-fpr, tpr, _ = roc_curve(prob_pd["label"], pos_scores)
-prec, rec, _ = precision_recall_curve(prob_pd["label"], pos_scores)
-roc_auc = roc_auc_score(prob_pd["label"], pos_scores)
-pr_auc  = average_precision_score(prob_pd["label"], pos_scores)
+false_positive_rate_values, true_positive_rate_values, _ = roc_curve(
+    probability_predictions_table["label"],
+    class_one_probability_scores
+)
+roc_curve_auc_score = roc_auc_score(
+    probability_predictions_table["label"],
+    class_one_probability_scores
+)
 
-# ROC Curve
-plt.figure(figsize=(7,5))
-plt.plot(fpr, tpr, lw=2, color='blue', label=f"AUC = {roc_auc:.3f}")
-plt.plot([0,1], [0,1], linestyle="--", color='gray')
-plt.xlabel("False Positive Rate"); plt.ylabel("True Positive Rate")
-plt.title("ROC Curve — Random Forest"); plt.legend(loc="lower right")
-plt.tight_layout()
-plt.savefig(os.path.join(results_dir, "ROC_Curve_RF.png"))
-plt.close()
+chart_generator.figure(figsize=(7, 5))
+chart_generator.plot(
+    false_positive_rate_values,
+    true_positive_rate_values,
+    lw=2,
+    color='blue',
+    label=f"AUC = {roc_curve_auc_score:.3f}"
+)
+chart_generator.plot([0, 1], [0, 1], linestyle="--", color='gray')
+chart_generator.xlabel("False Positive Rate")
+chart_generator.ylabel("True Positive Rate")
+chart_generator.title("ROC Curve — Random Forest")
+chart_generator.legend(loc="lower right")
+chart_generator.tight_layout()
+roc_curve_file = os.path.join(OUTPUT_ARTIFACTS_FOLDER, "ROC_Curve_RF.png")
+chart_generator.savefig(roc_curve_file)
+chart_generator.close()
+print("ROC curve chart saved")
 
-# Precision–Recall Curve
-plt.figure(figsize=(7,5))
-plt.plot(rec, prec, lw=2, color='darkorange', label=f"AP = {pr_auc:.3f}")
-plt.xlabel("Recall"); plt.ylabel("Precision")
-plt.title("Precision–Recall Curve — Random Forest")
-plt.legend(loc="lower left")
-plt.tight_layout()
-plt.savefig(os.path.join(results_dir, "Precision_Recall_Curve_RF.png"))
-plt.close()
+# =========================================================
+# Create Precision-Recall Curve Visualization
+# =========================================================
+precision_score_values, recall_score_values, _ = precision_recall_curve(
+    probability_predictions_table["label"],
+    class_one_probability_scores
+)
+precision_recall_average_precision = average_precision_score(
+    probability_predictions_table["label"],
+    class_one_probability_scores
+)
+
+chart_generator.figure(figsize=(7, 5))
+chart_generator.plot(
+    recall_score_values,
+    precision_score_values,
+    lw=2,
+    color='darkorange',
+    label=f"AP = {precision_recall_average_precision:.3f}"
+)
+chart_generator.xlabel("Recall")
+chart_generator.ylabel("Precision")
+chart_generator.title("Precision–Recall Curve — Random Forest")
+chart_generator.legend(loc="lower left")
+chart_generator.tight_layout()
+precision_recall_curve_file = os.path.join(OUTPUT_ARTIFACTS_FOLDER, "Precision_Recall_Curve_RF.png")
+chart_generator.savefig(precision_recall_curve_file)
+chart_generator.close()
+print("Precision-recall curve chart saved")
+
+
