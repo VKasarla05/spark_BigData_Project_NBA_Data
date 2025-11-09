@@ -18,7 +18,7 @@ import matplotlib.pyplot as visualization_platform
 import seaborn as statistical_visualizer
 
 
-INPUT_DATASET_LOCATION = "/content/discretized_nba_stats/discretized_nba_stats/part-*.csv"
+INPUT_DATASET_LOCATION = "/home/sat3812/discretized_nba_stats/part-*.csv"
 OUTPUT_ARTIFACTS_LOCATION = "/home/sat3812/BD_Project/Codes/Models/Visualizations"
 RANDOM_STATE_SEED = 42
 NEURAL_NETWORK_LAYERS = [20, 10]
