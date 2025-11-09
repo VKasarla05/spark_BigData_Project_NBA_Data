@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import time
+import os
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.ml.classification import RandomForestClassifier, LinearSVC
@@ -13,12 +14,14 @@ from sklearn.metrics import confusion_matrix, classification_report
 from sklearn.metrics import ConfusionMatrixDisplay, roc_curve, precision_recall_curve, roc_auc_score, average_precision_score
 
 # Starting the spark session
-spark = SparkSession.builder.appName('NBA_RF_Classification').getOrCreate()
+spark = SparkSession.builder.appName('NBA_SVM_Classification').getOrCreate()
 
 # Loading the dataset
-data_path = '/content/part-*.csv'
+data_path = '/home/sat3812/discretized_nba_stats/part-*.csv'
 nba_data = spark.read.csv(data_path, header=True, inferSchema=True)
 print(nba_data)
+results_dir=f"/home/sat3812/BD_Project/Codes/Models/Visualizations"
+os.makedirs(results_dir,exist_ok=True)
 
 #Feature Preperation
 
@@ -74,7 +77,9 @@ plt.hist(PER_values[target], bins=30, color='skyblue', edgecolor='black')
 plt.title('Target Variable Distribution')
 plt.xlabel(target)
 plt.ylabel('Frequency')
-plt.show()
+plt.tight_layout()
+plt.savefig(os.path.join(results_dir,"PER_SVM.png"))
+plt.close()
 
 # Building the SVM model
 SVM = LinearSVC(featuresCol='features', labelCol='label', maxIter=100, regParam=0.1)
@@ -89,14 +94,26 @@ accuracy_evaluator = MulticlassClassificationEvaluator(
 f1_evaluator = MulticlassClassificationEvaluator(
     labelCol='label', predictionCol='prediction', metricName='f1'
 )
+recall_evaluator=MulticlassClassificationEvaluator(
+    labelCol='label', predictionCol='prediction', metricName='weightedRecall'
+)
+precision_evaluator=MulticlassClassificationEvaluator(
+    labelCol='label', predictionCol='prediction', metricName='weightedPrecision'
+)
 
 #Compute Metrix
 accuracy = accuracy_evaluator.evaluate(SVM_predictions)
 f1_score = f1_evaluator.evaluate(SVM_predictions)
+precision=precision_evaluator.evaluate(SVM_predictions)
+recall=recall_evaluator.evaluate(SVM_predictions)
+
 
 print('SVM classification Results')
 print(f'Accuracy: {accuracy}')
 print(f'F1 Score: {f1_score}')
+print(f'Recall:{recall}')
+print(f'precision:{precision}')
+print("\n")
 
 SVM_predictions.select('label', 'prediction', 'features').show(5, truncate=False)
 
@@ -112,6 +129,6 @@ print('Confusion Matrix', cm)
 display_pred = ConfusionMatrixDisplay(cm, display_labels=['Low_PER', 'High_PER'])
 display_pred.plot(cmap='Blues')
 plt.title('SVM Confusion Matrix')
-plt.show()
-
-SVM_model.save('clean_output/SVM_NBA_MODEL')
+plt.tight_layout()
+plt.savefig(os.path.join(results_dir,"SVM_confusion_metrix.png"))
+plt.close()
