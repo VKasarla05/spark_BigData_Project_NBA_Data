@@ -20,8 +20,8 @@ import matplotlib.pyplot as chart_generator
 import seaborn as stats_visualizer
 
 # Data Path
-PLAYER_STATS_FILE_PATTERN = "/content/discretized_nba_stats/discretized_nba_stats/part-*.csv"
-OUTPUT_ARTIFACTS_FOLDER = "/content/"
+PLAYER_STATS_FILE_PATTERN = "/home/sat3812/discretized_nba_stats/part-*.csv"
+OUTPUT_ARTIFACTS_FOLDER = "/home/sat3812/BD_Project/Codes/Models/Visualizations"
 
 TRAIN_SPLIT_PERCENTAGE = 0.8
 TEST_SPLIT_PERCENTAGE = 0.2
@@ -33,7 +33,7 @@ FEATURE_SELECTION_METHOD = "auto"
 # =========================================================
 # Initializing Distributed Processing Engine
 # =========================================================
-distributed_compute_engine = ClusterCompute.builder.appName("RF_Basketball_Classifier").getOrCreate()
+distributed_compute_engine = ClusterCompute.builder.appName("NBA_RF_Classifier").getOrCreate()
 print("Distributed processing engine initialized")
 
 # =========================================================
