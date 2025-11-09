@@ -26,8 +26,8 @@ import seaborn as sns
 # =========================================================
 # Configuration and Hyperparameters
 # =========================================================
-NBA_DATA_PATH = "/content/discretized_nba_stats/discretized_nba_stats/part-*.csv"
-RESULTS_OUTPUT_PATH = "/content/"
+NBA_DATA_PATH = "/home/sat3812/discretized_nba_stats/part-*.csv"
+RESULTS_OUTPUT_PATH = "/home/sat3812/BD_Project/Codes/Models/Visualizations"
 TRAIN_TEST_SPLIT = [0.8, 0.2]
 SPLIT_SEED_VALUE = 42
 LR_MAX_ITERATIONS = 150
@@ -41,7 +41,7 @@ CLASSIFICATION_THRESHOLD = 0.5
 def establish_spark_environment():
     """Create Spark session for distributed computing"""
     return SparkSession.builder \
-        .appName("NBA_LR_Classification") \
+        .appName("NBA_LogisticRegression_Classification") \
         .getOrCreate()
 
 spark_engine = establish_spark_environment()
