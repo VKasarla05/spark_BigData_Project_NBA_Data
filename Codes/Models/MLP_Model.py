@@ -1,122 +1,218 @@
 
-# Spark MLP Classification Model for NBA Player Efficiency
-# Import Libraries
-from pyspark.sql import SparkSession
-from pyspark.sql import functions as F
-from pyspark.ml.feature import VectorAssembler, StandardScaler
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-from pyspark.ml.classification import MultilayerPerceptronClassifier
-from pyspark.ml.evaluation import MulticlassClassificationEvaluator, BinaryClassificationEvaluator
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-import time
+# MLP MODEL
+
+# Importing Libraries
 import os
+import time as execution_chronometer
+from pyspark.sql import SparkSession as AnalyticsComputeEngine
+from pyspark.sql import functions as neural_operations
+from pyspark.ml.feature import VectorAssembler as FeatureVectorizer
+from pyspark.ml.feature import StandardScaler as ZScoreNormalizer
+from pyspark.ml.classification import MultilayerPerceptronClassifier as NeuralNetworkClassifier
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator as PerformanceMetricsEvaluator
+from pyspark.ml.evaluation import BinaryClassificationEvaluator as BinaryPerformanceEvaluator
+from sklearn.metrics import confusion_matrix as calculate_error_matrix
+from sklearn.metrics import ConfusionMatrixDisplay as ErrorMatrixRenderer
+import pandas as dataframe_handler
+import matplotlib.pyplot as visualization_platform
+import seaborn as statistical_visualizer
 
-# Start Spark Session
-spark = SparkSession.builder.appName("NBA_MLP_Classification").getOrCreate()
 
-# Load Dataset
-data_path = "/home/sat3812/discretized_nba_stats/part-*.csv"
-nba_data = spark.read.csv(data_path, header=True, inferSchema=True)
-print(f"Dataset loaded: {nba_data.count()} rows, {len(nba_data.columns)} columns")
-# Create results folder
-results_dir = "/home/sat3812/BD_Project/Codes/Models/Visualizations"
-os.makedirs(results_dir, exist_ok=True)
-print(f"Results will be saved in: {results_dir}")
+INPUT_DATASET_LOCATION = "/content/discretized_nba_stats/discretized_nba_stats/part-*.csv"
+OUTPUT_ARTIFACTS_LOCATION = "/content/"
+RANDOM_STATE_SEED = 42
+NEURAL_NETWORK_LAYERS = [20, 10]
+MAXIMUM_TRAINING_ITERATIONS = 100
 
-# Feature Preparation
-# Identify target variable containing "PER"
-target = [col for col in nba_data.columns if "PER" in col.upper()][0]
-print(f"Target variable selected: {target}")
 
-# Select numeric feature columns
-feature_columns = [
-    col for col, dtype in nba_data.dtypes
-    if dtype in ("int", "double", "float", "bigint") and col != target
+# Spark Initialization
+analytics_compute_engine = AnalyticsComputeEngine.builder.appName("NBA_MLP_Classification").getOrCreate()
+# Dataset
+sports_performance_dataset = analytics_compute_engine.read.csv(
+    INPUT_DATASET_LOCATION,
+    header=True,
+    inferSchema=True
+)
+dataset_observation_count = sports_performance_dataset.count()
+dataset_dimension_count = len(sports_performance_dataset.columns)
+print(f"Athletic dataset acquisition successful: {dataset_observation_count} observations, {dataset_dimension_count} dimensions")
+
+# Output location
+os.makedirs(OUTPUT_ARTIFACTS_LOCATION, exist_ok=True)
+print(f"Output artifacts repository configured: {OUTPUT_ARTIFACTS_LOCATION}")
+
+# Target Performance
+performance_target_columns = [
+    column_identifier for column_identifier in sports_performance_dataset.columns
+    if "PER" in column_identifier.upper()
 ]
+identified_performance_target = performance_target_columns[0]
+print(f"Performance target metric identified: {identified_performance_target}")
 
-# Combine numeric columns into a single feature vector
-assembler = VectorAssembler(inputCols=feature_columns, outputCol="raw_features")
-data_with_features = assembler.transform(nba_data.na.drop(subset=[target]))
-
-# Standardize features
-scaler = StandardScaler(inputCol="raw_features", outputCol="features", withMean=True, withStd=True)
-scaled_data = scaler.fit(data_with_features).transform(data_with_features)
-
-# Binary Label Creation (Based on Average PER)
-# Compute average PER and use it as threshold
-average_per = nba_data.select(F.mean(F.col(target))).collect()[0][0]
-print(f"Average PER (classification threshold): {average_per:.2f}")
-
-# Create binary label column (Above Average = 1, Below Average = 0)
-labeled_data = nba_data.withColumn(
-    "label",
-    F.when(F.col(target) >= average_per, 1).otherwise(0)
+# Numerical Feature Attribute Extraction
+extracted_numerical_features = [
+    column_name for column_name, data_type in sports_performance_dataset.dtypes
+    if data_type in ("int", "double", "float", "bigint") 
+    and column_name != identified_performance_target
+]
+print(f"Numerical feature attributes extracted: {len(extracted_numerical_features)}")
+# Feature Extraction
+feature_vectorizer_transformer = FeatureVectorizer(
+    inputCols=extracted_numerical_features,
+    outputCol="raw_features"
+)
+aggregated_feature_dataset = feature_vectorizer_transformer.transform(
+    sports_performance_dataset.na.drop(subset=[identified_performance_target])
 )
 
-# Reassemble features for classification
-data_with_features = assembler.transform(labeled_data)
-scaled_classification_data = scaler.fit(data_with_features).transform(data_with_features).select("features", "label")
+# Feature Value Normalization via Z-Score Transformation
+zscore_normalizer = ZScoreNormalizer(
+    inputCol="raw_features",
+    outputCol="features",
+    withMean=True,
+    withStd=True
+)
+normalization_model_instance = zscore_normalizer.fit(aggregated_feature_dataset)
+normalized_feature_dataset = normalization_model_instance.transform(aggregated_feature_dataset)
 
-# Split dataset into training and testing
-train_data, test_data = scaled_classification_data.randomSplit([0.8, 0.2], seed=42)
-print(f"Train set: {train_data.count()} | Test set: {test_data.count()}")
+# Performance Threshold Computation
+computed_performance_threshold = sports_performance_dataset.select(
+    neural_operations.mean(neural_operations.col(identified_performance_target))
+).collect()[0][0]
+print(f"Performance classification threshold (mean): {computed_performance_threshold:.2f}")
 
-# Visualize PER Distribution with Threshold
-per_distribution = nba_data.select(target).toPandas()
-plt.figure(figsize=(9, 5))
-sns.histplot(per_distribution[target], bins=35, kde=True, color='darkorange', edgecolor='black')
-plt.axvline(average_per, color='navy', linestyle='--', linewidth=2, label=f'Threshold = {average_per:.2f}')
-plt.title("Player Efficiency Rating (PER) Distribution", fontsize=14, weight='bold')
-plt.xlabel("PER Value", fontsize=12)
-plt.ylabel("Player Count", fontsize=12)
-plt.legend()
-plt.tight_layout()
-per_plot_path = os.path.join(results_dir, "PER_Distribution.png")
-plt.savefig(per_plot_path, dpi=300)
-plt.close()
-print(f"PER distribution plot saved at: {per_plot_path}")
-# Train MLP Neural Network Classifier
-network_layers = [len(feature_columns), 20, 10, 2]
-mlp_classifier = MultilayerPerceptronClassifier(
+# Binary Classification Label Generation
+dataset_with_classification_labels = sports_performance_dataset.withColumn(
+    "label",
+    neural_operations.when(
+        neural_operations.col(identified_performance_target) >= computed_performance_threshold,
+        1
+    ).otherwise(0)
+)
+
+# Feature Re-aggregation for Classification Task
+classification_feature_dataset = feature_vectorizer_transformer.transform(
+    dataset_with_classification_labels.na.drop(subset=[identified_performance_target])
+)
+normalized_classification_dataset = normalization_model_instance.transform(
+    classification_feature_dataset
+).select("features", "label")
+
+# Training-Testing Dataset Partitioning
+model_training_subset, model_testing_subset = normalized_classification_dataset.randomSplit(
+    [0.8,0.2],
+    seed=RANDOM_STATE_SEED
+)
+training_subset_size = model_training_subset.count()
+testing_subset_size = model_testing_subset.count()
+print(f"Data partitioning completed: {training_subset_size} training observations, {testing_subset_size} testing observations")
+
+# Performance Metric
+performance_metric_distribution = sports_performance_dataset.select(identified_performance_target).toPandas()
+
+visualization_platform.figure(figsize=(9, 5))
+statistical_visualizer.histplot(
+    performance_metric_distribution[identified_performance_target],
+    bins=35,
+    kde=True,
+    color='darkorange',
+    edgecolor='black'
+)
+visualization_platform.axvline(
+    computed_performance_threshold,
+    color='navy',
+    linestyle='--',
+    linewidth=2,
+    label=f'Threshold = {computed_performance_threshold:.2f}'
+)
+visualization_platform.title("Player Efficiency Rating (PER) Distribution Analysis", fontsize=14, weight='bold')
+visualization_platform.xlabel("PER Value", fontsize=12)
+visualization_platform.ylabel("Player Observation Count", fontsize=12)
+visualization_platform.legend()
+visualization_platform.tight_layout()
+
+distribution_visualization_output = os.path.join(OUTPUT_ARTIFACTS_LOCATION, "PER_Distribution.png")
+visualization_platform.savefig(distribution_visualization_output, dpi=300)
+visualization_platform.close()
+print(f"Performance distribution visualization saved: {distribution_visualization_output}")
+
+# Neural Network Architecture
+input_layer_dimension = len(extracted_numerical_features)
+complete_network_architecture = [input_layer_dimension] + NEURAL_NETWORK_LAYERS + [2]
+print(f"Neural network architecture configured: {complete_network_architecture}")
+
+neural_network_classifier = NeuralNetworkClassifier(
     featuresCol="features",
     labelCol="label",
-    layers=network_layers,
-    maxIter=100
+    layers=complete_network_architecture,
+    maxIter=MAXIMUM_TRAINING_ITERATIONS,
+    seed=RANDOM_STATE_SEED
 )
 
-start_time = time.time()
-trained_mlp = mlp_classifier.fit(train_data)
-predictions = trained_mlp.transform(test_data)
-training_time = time.time() - start_time
-print(f"Training completed in {training_time:.2f} seconds")
+# Neural Network Model Training Execution
+print("Initiating neural network training process...")
+training_execution_start_timestamp = execution_chronometer.time()
+fitted_neural_network_model = neural_network_classifier.fit(model_training_subset)
+generated_predictions = fitted_neural_network_model.transform(model_testing_subset)
+total_training_elapsed_time = execution_chronometer.time() - training_execution_start_timestamp
+print(f"Neural network training process completed: {total_training_elapsed_time:.2f} seconds")
 
-# Evaluate Model Performance
-accuracy_eval = MulticlassClassificationEvaluator(metricName="accuracy")
-precision_eval = MulticlassClassificationEvaluator(metricName="weightedPrecision")
-recall_eval = MulticlassClassificationEvaluator(metricName="weightedRecall")
-auc_eval = BinaryClassificationEvaluator(metricName="areaUnderROC")
+# Model Performance Evaluation Metrics Computation
+accuracy_performance_evaluator = PerformanceMetricsEvaluator(
+    labelCol="label",
+    predictionCol="prediction",
+    metricName="accuracy"
+)
+precision_performance_evaluator = PerformanceMetricsEvaluator(
+    labelCol="label",
+    predictionCol="prediction",
+    metricName="weightedPrecision"
+)
+recall_performance_evaluator = PerformanceMetricsEvaluator(
+    labelCol="label",
+    predictionCol="prediction",
+    metricName="weightedRecall"
+)
+auc_performance_evaluator = BinaryPerformanceEvaluator(
+    labelCol="label",
+    rawPredictionCol="rawPrediction",
+    metricName="areaUnderROC"
+)
 
-results_df = pd.DataFrame({
-    "Model": ["Multilayer Perceptron Classifier"],
-    "Accuracy": [accuracy_eval.evaluate(predictions)],
-    "Precision": [precision_eval.evaluate(predictions)],
-    "Recall": [recall_eval.evaluate(predictions)],
-    "AUC": [auc_eval.evaluate(predictions)]
+computed_accuracy_metric = accuracy_performance_evaluator.evaluate(generated_predictions)
+computed_precision_metric = precision_performance_evaluator.evaluate(generated_predictions)
+computed_recall_metric = recall_performance_evaluator.evaluate(generated_predictions)
+computed_auc_metric = auc_performance_evaluator.evaluate(generated_predictions)
+
+# Performance Results
+performance_results_compilation = dataframe_handler.DataFrame({
+    "Model": ["Multilayer Perceptron Neural Classifier"],
+    "Accuracy": [computed_accuracy_metric],
+    "Precision": [computed_precision_metric],
+    "Recall": [computed_recall_metric],
+    "AUC": [computed_auc_metric],
+    "Training_Time(s)": [total_training_elapsed_time]
 })
 
-print("\nClassification Performance:")
-print(results_df.to_string(index=False))
+print("\nPerformance Metrics Summary:")
+print(performance_results_compilation.to_string(index=False))
 
-# Confusion Matrix Visualization
-preds_pd = predictions.select("label", "prediction").toPandas()
-cm = confusion_matrix(preds_pd["label"], preds_pd["prediction"])
-disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=["Below Avg", "Above Avg"])
-disp.plot(cmap="Oranges")
-plt.title("MLP Classification Confusion Matrix", fontsize=14, weight='bold')
-plt.tight_layout()
-cm_plot_path = os.path.join(results_dir, "Confusion_Matrix.png")
-plt.savefig(cm_plot_path, dpi=300)
-plt.close()
-print(f"Confusion matrix saved at: {cm_plot_path}")
+# Error Matrix Generation and Visualization
+predicted_labels_dataframe = generated_predictions.select("label", "prediction").toPandas()
+computed_classification_error_matrix = calculate_error_matrix(
+    predicted_labels_dataframe["label"],
+    predicted_labels_dataframe["prediction"]
+)
+
+error_matrix_visualization = ErrorMatrixRenderer(
+    confusion_matrix=computed_classification_error_matrix,
+    display_labels=["Below Average Performance", "Above Average Performance"]
+)
+error_matrix_visualization.plot(cmap="Oranges")
+visualization_platform.title("Multilayer Perceptron Classification — Error Matrix Visualization", fontsize=14, weight='bold')
+visualization_platform.tight_layout()
+
+error_matrix_output_location = os.path.join(OUTPUT_ARTIFACTS_LOCATION, "Confusion_Matrix.png")
+visualization_platform.savefig(error_matrix_output_location, dpi=300)
+visualization_platform.close()
+print(f"Error matrix visualization exported: {error_matrix_output_location}")
