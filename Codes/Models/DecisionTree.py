@@ -1,216 +1,393 @@
-# =========================================================
-# Spark Decision Tree Classification Model for NBA Player Efficiency
-# =========================================================
-
-# Import Libraries
-from pyspark.sql import SparkSession
-from pyspark.sql import functions as F
-from pyspark.ml.feature import VectorAssembler, StandardScaler
-from pyspark.ml.classification import DecisionTreeClassifier
-from pyspark.ml.evaluation import MulticlassClassificationEvaluator, BinaryClassificationEvaluator
-
+# --------------Decision Tree----------------------
+# Modules Importing
+import os
+import time as elapsed_duration_tracker
+from pyspark.sql import SparkSession as DistributedComputeEngine
+from pyspark.sql import functions as tree_operations
+from pyspark.ml.feature import VectorAssembler as AttributeVectorCombiner
+from pyspark.ml.feature import StandardScaler as FeatureValueNormalizer
+from pyspark.ml.classification import DecisionTreeClassifier as HierarchicalTreeClassifier
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator as MultiLabelMetricsEvaluator
+from pyspark.ml.evaluation import BinaryClassificationEvaluator as BinaryMetricsEvaluator
 from sklearn.metrics import (
-    confusion_matrix, ConfusionMatrixDisplay,
-    roc_curve, precision_recall_curve,
-    roc_auc_score, average_precision_score,
-    precision_recall_fscore_support, classification_report
+    confusion_matrix as compute_error_matrix,
+    ConfusionMatrixDisplay as ErrorMatrixVisualizer,
+    roc_curve as receiver_operator_curve_calculation,
+    precision_recall_curve as precision_recall_tradeoff_curve,
+    roc_auc_score as calculate_roc_area,
+    average_precision_score as calculate_average_precision,
+    precision_recall_fscore_support as comprehensive_metric_calculator,
+    classification_report as detailed_classification_summary
 )
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-import time
-import os
-from datetime import datetime
 
-# ---------------------------------------------------------
-# Start Spark Session
-# ---------------------------------------------------------
-spark = SparkSession.builder.appName("NBA_DT_Classification").getOrCreate()
 
-# ---------------------------------------------------------
-# Load Dataset
-# ---------------------------------------------------------
-data_path = "/home/sat3812/discretized_nba_stats/part-*.csv"
-nba_data = spark.read.csv(data_path, header=True, inferSchema=True)
-print(f"Dataset loaded: {nba_data.count()} rows, {len(nba_data.columns)} columns")
+ATHLETE_STATISTICS_FILE_PATTERN = "/content/discretized_nba_stats/discretized_nba_stats/part-*.csv"
+PERFORMANCE_OUTPUT_DIRECTORY = "/content/"
+TRAINING_DATASET_FRACTION = 0.8
+TESTING_DATASET_FRACTION = 0.2
+RANDOM_REPRODUCTION_SEED = 42
+TREE_MAXIMUM_DEPTH = 12
+TREE_MINIMUM_INSTANCES = 1
+TREE_MINIMUM_INFO_GAIN = 0.0
+TREE_IMPURITY_METRIC = "gini"
+TARGET_METRIC_CANDIDATES = ["ss_PER_quantile", "ss_PER", "PER"]
 
-# ---------------------------------------------------------
-# Results Directory Setup
-# ---------------------------------------------------------
-results_dir = f"/home/sat3812/BD_Project/Codes/Models/Visualizations"
-os.makedirs(results_dir, exist_ok=True)
-print(f"Results will be saved in: {results_dir}")
+# Distributed Computing Environment Initialization
+distributed_compute_engine = DistributedComputeEngine.builder.appName(
+    "DecisionTree_Athletic_Classification"
+).getOrCreate()
+print("Distributed computing environment initialized successfully")
 
-# =========================================================
-# Feature Preparation + Target Selection
-# =========================================================
-candidate_targets = ["ss_PER_quantile", "ss_PER", "PER"]
-target = next((c for c in candidate_targets if c in nba_data.columns), None)
-if target is None:
-    raise ValueError("No PER-like target found. Expected one of: 'ss_PER_quantile', 'ss_PER', or 'PER'.")
+# Athletic Performance Dataset Loading
+athlete_performance_dataset = distributed_compute_engine.read.csv(
+    ATHLETE_STATISTICS_FILE_PATTERN,
+    header=True,
+    inferSchema=True
+)
+dataset_row_count = athlete_performance_dataset.count()
+dataset_column_count = len(athlete_performance_dataset.columns)
+print(f"Athletic dataset acquisition complete: {dataset_row_count} records, {dataset_column_count} attributes")
 
-print(f"Target selected: {target}")
+# Output Storage
+os.makedirs(PERFORMANCE_OUTPUT_DIRECTORY, exist_ok=True)
+print(f"Performance artifacts directory: {PERFORMANCE_OUTPUT_DIRECTORY}")
 
-feature_columns = [
-    col for col, dtype in nba_data.dtypes
-    if dtype in ("int", "double", "float", "bigint") and col != target
+# Target Metric Identification and Validation
+identified_target_metric = next(
+    (metric_name for metric_name in TARGET_METRIC_CANDIDATES 
+     if metric_name in athlete_performance_dataset.columns),
+    None
+)
+if identified_target_metric is None:
+    raise ValueError(
+        f"No target metric found. Expected one of: {', '.join(TARGET_METRIC_CANDIDATES)}"
+    )
+
+print(f"Target performance metric selected: {identified_target_metric}")
+
+# Numerical Attribute Extraction and Selection
+extracted_feature_columns = [
+    column_identifier for column_identifier, column_datatype in athlete_performance_dataset.dtypes
+    if column_datatype in ("int", "double", "float", "bigint") 
+    and column_identifier != identified_target_metric
 ]
-print(f"#Features: {len(feature_columns)}")
+print(f"Numerical features extracted: {len(extracted_feature_columns)}")
 
-assembler = VectorAssembler(inputCols=feature_columns, outputCol="raw_features")
-data_with_features = assembler.transform(nba_data.na.drop(subset=[target]))
+# Feature Vector Construction
+attribute_combining_transformer = AttributeVectorCombiner(
+    inputCols=extracted_feature_columns,
+    outputCol="raw_features"
+)
+dataset_with_combined_vectors = attribute_combining_transformer.transform(
+    athlete_performance_dataset.na.drop(subset=[identified_target_metric])
+)
 
-if target == "ss_PER_quantile":
-    labeled = data_with_features.withColumn("label", F.col(target).cast("int"))
-    label_note = "Using quantile bins as multiclass labels."
-    average_per = None
+# Target Label Preparation
+if identified_target_metric == "ss_PER_quantile":
+    dataset_with_labels = dataset_with_combined_vectors.withColumn(
+        "label",
+        tree_operations.col(identified_target_metric).cast("int")
+    )
+    label_preparation_note = "Using quantile bins as multiclass classification targets"
+    efficiency_threshold_value = None
 else:
-    average_per = nba_data.select(F.mean(F.col(target))).collect()[0][0]
-    labeled = data_with_features.withColumn("label", F.when(F.col(target) >= average_per, 1).otherwise(0))
-    label_note = f"Binarized '{target}' at its average ({average_per:.4f})."
+    efficiency_threshold_value = athlete_performance_dataset.select(
+        tree_operations.mean(tree_operations.col(identified_target_metric))
+    ).collect()[0][0]
+    dataset_with_labels = dataset_with_combined_vectors.withColumn(
+        "label",
+        tree_operations.when(
+            tree_operations.col(identified_target_metric) >= efficiency_threshold_value, 
+            1
+        ).otherwise(0)
+    )
+    label_preparation_note = f"Binary classification using threshold: {efficiency_threshold_value:.4f}"
 
-print(f"Label prep: {label_note}")
+print(f"Label preparation strategy: {label_preparation_note}")
 
-scaler = StandardScaler(inputCol="raw_features", outputCol="features", withMean=True, withStd=True)
-final_df = scaler.fit(labeled).transform(labeled).select("features", "label")
+# Feature Normalization and Scaling
+feature_normalization_transformer = FeatureValueNormalizer(
+    inputCol="raw_features",
+    outputCol="features",
+    withMean=True,
+    withStd=True
+)
+normalization_model_fitted = feature_normalization_transformer.fit(dataset_with_labels)
+dataset_with_normalized_features = normalization_model_fitted.transform(dataset_with_labels)
 
-train_data, test_data = final_df.randomSplit([0.8, 0.2], seed=42)
-print(f"Train: {train_data.count()} | Test: {test_data.count()}")
+model_ready_dataset = dataset_with_normalized_features.select("features", "label")
 
-# =========================================================
-# Visualize PER Distribution
-# =========================================================
-if average_per is not None:
-    per_distribution = nba_data.select(target).toPandas()
+# Training and Testing Dataset Partitioning
+training_dataset_partition, testing_dataset_partition = model_ready_dataset.randomSplit(
+    [TRAINING_DATASET_FRACTION, TESTING_DATASET_FRACTION],
+    seed=RANDOM_REPRODUCTION_SEED
+)
+training_dataset_size = training_dataset_partition.count()
+testing_dataset_size = testing_dataset_partition.count()
+print(f"Data partitioning: {training_dataset_size} training | {testing_dataset_size} testing")
+
+# Performance Metric Distribution Visualization
+if efficiency_threshold_value is not None:
+    performance_metric_values = athlete_performance_dataset.select(identified_target_metric).toPandas()
+    
     plt.figure(figsize=(9, 5))
-    sns.histplot(per_distribution[target], bins=35, kde=True, edgecolor='black', color='royalblue')
-    plt.axvline(average_per, linestyle='--', linewidth=2, color='red', label=f'Threshold = {average_per:.2f}')
-    plt.title(f"{target} Distribution", fontsize=14, weight='bold')
-    plt.xlabel(target); plt.ylabel("Count"); plt.legend()
+    sns.histplot(
+        performance_metric_values[identified_target_metric],
+        bins=35,
+        kde=True,
+        edgecolor='black',
+        color='royalblue'
+    )
+    plt.axvline(
+        efficiency_threshold_value,
+        linestyle='--',
+        linewidth=2,
+        color='red',
+        label=f'Threshold = {efficiency_threshold_value:.2f}'
+    )
+    plt.title(f"{identified_target_metric} Distribution Analysis", fontsize=14, weight='bold')
+    plt.xlabel(identified_target_metric)
+    plt.ylabel("Observation Count")
+    plt.legend()
     plt.tight_layout()
-    plt.savefig(os.path.join(results_dir, "PER_Distribution_DT.png"))
+    
+    distribution_visualization_path = os.path.join(PERFORMANCE_OUTPUT_DIRECTORY, "PER_Distribution_DT.png")
+    plt.savefig(distribution_visualization_path)
     plt.close()
+    print(f"Distribution visualization saved: {distribution_visualization_path}")
 
-# =========================================================
-# Train Decision Tree Classifier
-# =========================================================
-dt = DecisionTreeClassifier(
+# Decision Tree Model Configuration and Training
+hierarchical_tree_classifier = HierarchicalTreeClassifier(
     featuresCol="features",
     labelCol="label",
     predictionCol="prediction",
     probabilityCol="probability",
     rawPredictionCol="rawPrediction",
-    maxDepth=12,
-    minInstancesPerNode=1,
-    minInfoGain=0.0,
-    impurity="gini",
-    seed=42
+    maxDepth=TREE_MAXIMUM_DEPTH,
+    minInstancesPerNode=TREE_MINIMUM_INSTANCES,
+    minInfoGain=TREE_MINIMUM_INFO_GAIN,
+    impurity=TREE_IMPURITY_METRIC,
+    seed=RANDOM_REPRODUCTION_SEED
 )
 
-start_time = time.time()
-dt_model = dt.fit(train_data)
-predictions = dt_model.transform(test_data).cache()
-training_time = time.time() - start_time
-print(f"Training completed in {training_time:.2f} seconds")
+print("Initiating decision tree model training...")
+training_execution_start_time = elapsed_duration_tracker.time()
+fitted_tree_model = hierarchical_tree_classifier.fit(training_dataset_partition)
+total_training_elapsed_time = elapsed_duration_tracker.time() - training_execution_start_time
+print(f"Model training completed: {total_training_elapsed_time:.2f} seconds")
 
-# =========================================================
-# Evaluate Model Performance
-# =========================================================
-e_acc = MulticlassClassificationEvaluator(labelCol="label", predictionCol="prediction", metricName="accuracy")
-e_f1  = MulticlassClassificationEvaluator(labelCol="label", predictionCol="prediction", metricName="f1")
-e_wp  = MulticlassClassificationEvaluator(labelCol="label", predictionCol="prediction", metricName="weightedPrecision")
-e_wr  = MulticlassClassificationEvaluator(labelCol="label", predictionCol="prediction", metricName="weightedRecall")
 
-results = {
-    "Model": ["Decision Tree Classifier"],
-    "Accuracy":  [e_acc.evaluate(predictions)],
-    "Precision": [e_wp.evaluate(predictions)],
-    "Recall":    [e_wr.evaluate(predictions)],
-    "F1":        [e_f1.evaluate(predictions)]
-}
+# Model Predictions Generation
+test_dataset_predictions = fitted_tree_model.transform(testing_dataset_partition).cache()
 
+
+# Performance Metrics Calculation
+accuracy_metric_evaluator = MultiLabelMetricsEvaluator(
+    labelCol="label",
+    predictionCol="prediction",
+    metricName="accuracy"
+)
+f1_score_metric_evaluator = MultiLabelMetricsEvaluator(
+    labelCol="label",
+    predictionCol="prediction",
+    metricName="f1"
+)
+weighted_precision_metric_evaluator = MultiLabelMetricsEvaluator(
+    labelCol="label",
+    predictionCol="prediction",
+    metricName="weightedPrecision"
+)
+weighted_recall_metric_evaluator = MultiLabelMetricsEvaluator(
+    labelCol="label",
+    predictionCol="prediction",
+    metricName="weightedRecall"
+)
+
+computed_accuracy_metric = accuracy_metric_evaluator.evaluate(test_dataset_predictions)
+computed_f1_metric = f1_score_metric_evaluator.evaluate(test_dataset_predictions)
+computed_precision_metric = weighted_precision_metric_evaluator.evaluate(test_dataset_predictions)
+computed_recall_metric = weighted_recall_metric_evaluator.evaluate(test_dataset_predictions)
+
+# Area Under Curve Calculation (ROC)
 try:
-    auc_eval = BinaryClassificationEvaluator(labelCol="label", rawPredictionCol="rawPrediction", metricName="areaUnderROC")
-    results["AUC"] = [auc_eval.evaluate(predictions)]
-except Exception:
-    results["AUC"] = [np.nan]
+    roc_area_evaluator = BinaryMetricsEvaluator(
+        labelCol="label",
+        rawPredictionCol="rawPrediction",
+        metricName="areaUnderROC"
+    )
+    computed_auc_metric = roc_area_evaluator.evaluate(test_dataset_predictions)
+except Exception as e:
+    print(f"ROC AUC calculation skipped: {e}")
+    computed_auc_metric = float('nan')
 
-results_df = pd.DataFrame(results)
-results_df["Training_Time(s)"] = training_time
+# Results
+performance_results_table = pd.DataFrame({
+    "Model": ["Decision Tree Hierarchical Classifier"],
+    "Accuracy": [computed_accuracy_metric],
+    "Precision": [computed_precision_metric],
+    "Recall": [computed_recall_metric],
+    "F1": [computed_f1_metric],
+    "AUC": [computed_auc_metric],
+    "Training_Time(s)": [total_training_elapsed_time]
+})
 
-print("\nClassification Performance:")
-print(results_df.to_string(index=False,justify='center'))
+print("\nPerformance Metrics Summary:")
+print(performance_results_table.to_string(index=False, justify='center'))
 
-results_df.to_csv(os.path.join(results_dir, "DT_Classification_Results.csv"), index=False)
+results_csv_output_path = os.path.join(PERFORMANCE_OUTPUT_DIRECTORY, "DT_Classification_Results.csv")
+performance_results_table.to_csv(results_csv_output_path, index=False)
+print(f"Results exported: {results_csv_output_path}")
 
-# =========================================================
-# Confusion Matrix Visualization
-# =========================================================
-preds_pd = predictions.select("label", "prediction").toPandas()
-cm = confusion_matrix(preds_pd["label"], preds_pd["prediction"])
-disp = ConfusionMatrixDisplay(confusion_matrix=cm)
-disp.plot(cmap="Blues")
+# Confusion Matrix Generation and Visualization
+predictions_with_labels = test_dataset_predictions.select("label", "prediction").toPandas()
+computed_confusion_matrix = compute_error_matrix(
+    predictions_with_labels["label"],
+    predictions_with_labels["prediction"]
+)
+
+confusion_matrix_visualizer = ErrorMatrixVisualizer(
+    confusion_matrix=computed_confusion_matrix
+)
+confusion_matrix_visualizer.plot(cmap="Blues")
 plt.title("Decision Tree Classification — Confusion Matrix", fontsize=14, weight='bold')
 plt.tight_layout()
-plt.savefig(os.path.join(results_dir, "Confusion_Matrix_DT.png"))
+
+confusion_matrix_output_path = os.path.join(PERFORMANCE_OUTPUT_DIRECTORY, "Confusion_Matrix_DT.png")
+plt.savefig(confusion_matrix_output_path)
 plt.close()
+print(f"Confusion matrix visualization saved: {confusion_matrix_output_path}")
 
-# =========================================================
-# ROC & Precision–Recall Curves
-# =========================================================
-prob_pd = predictions.select("label", "probability").toPandas()
+# ROC Curve Visualization
+probability_predictions_data = test_dataset_predictions.select("label", "probability").toPandas()
 try:
-    pos_scores = prob_pd["probability"].apply(lambda v: float(v[1]))
-    roc_auc = roc_auc_score(prob_pd["label"], pos_scores)
-    pr_auc  = average_precision_score(prob_pd["label"], pos_scores)
-
-    fpr, tpr, _ = roc_curve(prob_pd["label"], pos_scores)
-    prec, rec, _ = precision_recall_curve(prob_pd["label"], pos_scores)
-
-    plt.figure(figsize=(7,5))
-    plt.plot(fpr, tpr, lw=2, color='blue', label=f"AUC = {roc_auc:.3f}")
-    plt.plot([0,1], [0,1], linestyle="--", color='gray')
-    plt.xlabel("False Positive Rate"); plt.ylabel("True Positive Rate")
-    plt.title("ROC Curve — Decision Tree")
+    extracted_positive_class_scores = probability_predictions_data["probability"].apply(
+        lambda probability_vector: float(probability_vector[1])
+    )
+    
+    calculated_roc_auc_value = calculate_roc_area(
+        probability_predictions_data["label"],
+        extracted_positive_class_scores
+    )
+    calculated_pr_auc_value = calculate_average_precision(
+        probability_predictions_data["label"],
+        extracted_positive_class_scores
+    )
+    
+    fpr_coordinates, tpr_coordinates, _ = receiver_operator_curve_calculation(
+        probability_predictions_data["label"],
+        extracted_positive_class_scores
+    )
+    precision_coordinates, recall_coordinates, _ = precision_recall_tradeoff_curve(
+        probability_predictions_data["label"],
+        extracted_positive_class_scores
+    )
+    
+    # ROC Curve Plot
+    plt.figure(figsize=(7, 5))
+    plt.plot(
+        fpr_coordinates,
+        tpr_coordinates,
+        lw=2,
+        color='blue',
+        label=f"AUC = {calculated_roc_auc_value:.3f}"
+    )
+    plt.plot([0, 1], [0, 1], linestyle="--", color='gray')
+    plt.xlabel("False Positive Rate")
+    plt.ylabel("True Positive Rate")
+    plt.title("ROC Curve — Decision Tree Classifier")
     plt.legend(loc="lower right")
     plt.tight_layout()
-    plt.savefig(os.path.join(results_dir, "ROC_Curve_DT.png"))
+    
+    roc_output_path = os.path.join(PERFORMANCE_OUTPUT_DIRECTORY, "ROC_Curve_DT.png")
+    plt.savefig(roc_output_path)
     plt.close()
-
-    plt.figure(figsize=(7,5))
-    plt.plot(rec, prec, lw=2, color='orange', label=f"AP = {pr_auc:.3f}")
-    plt.xlabel("Recall"); plt.ylabel("Precision")
-    plt.title("Precision–Recall Curve — Decision Tree")
+    print(f"ROC curve visualization saved: {roc_output_path}")
+    
+    # Precision-Recall Curve Plot
+    plt.figure(figsize=(7, 5))
+    plt.plot(
+        recall_coordinates,
+        precision_coordinates,
+        lw=2,
+        color='orange',
+        label=f"AP = {calculated_pr_auc_value:.3f}"
+    )
+    plt.xlabel("Recall")
+    plt.ylabel("Precision")
+    plt.title("Precision–Recall Curve — Decision Tree Classifier")
     plt.legend(loc="lower left")
     plt.tight_layout()
-    plt.savefig(os.path.join(results_dir, "Precision_Recall_Curve_DT.png"))
+    
+    pr_output_path = os.path.join(PERFORMANCE_OUTPUT_DIRECTORY, "Precision_Recall_Curve_DT.png")
+    plt.savefig(pr_output_path)
     plt.close()
+    print(f"Precision-recall curve visualization saved: {pr_output_path}")
+    
+except Exception as exception_details:
+    print(f"ROC and PR curve generation skipped: {exception_details}")
+    
+# Comprehensive Detailed Metrics Computation
+true_labels_array = predictions_with_labels["label"].values.astype(int)
+predicted_labels_array = predictions_with_labels["prediction"].values.astype(int)
 
-except Exception as e:
-    print(f"(Multiclass ROC/PR skipped): {e}")
+macro_precision_avg, macro_recall_avg, macro_f1_avg, _ = comprehensive_metric_calculator(
+    true_labels_array,
+    predicted_labels_array,
+    average='macro',
+    zero_division=0
+)
+micro_precision_avg, micro_recall_avg, micro_f1_avg, _ = comprehensive_metric_calculator(
+    true_labels_array,
+    predicted_labels_array,
+    average='micro',
+    zero_division=0
+)
+weighted_precision_avg, weighted_recall_avg, weighted_f1_avg, _ = comprehensive_metric_calculator(
+    true_labels_array,
+    predicted_labels_array,
+    average='weighted',
+    zero_division=0
+)
 
-# =========================================================
-# Detailed Metrics
-# =========================================================
-y_true = preds_pd["label"].values.astype(int)
-y_pred = preds_pd["prediction"].values.astype(int)
+print("\n" + "="*60)
+print("DETAILED CLASSIFICATION METRICS")
+print("="*60)
+print(f"Macro Averaging     → Precision: {macro_precision_avg:.4f} | Recall: {macro_recall_avg:.4f} | F1: {macro_f1_avg:.4f}")
+print(f"Micro Averaging     → Precision: {micro_precision_avg:.4f} | Recall: {micro_recall_avg:.4f} | F1: {micro_f1_avg:.4f}")
+print(f"Weighted Averaging  → Precision: {weighted_precision_avg:.4f} | Recall: {weighted_recall_avg:.4f} | F1: {weighted_f1_avg:.4f}")
 
-prec_macro, rec_macro, f1_macro, _ = precision_recall_fscore_support(y_true, y_pred, average='macro',  zero_division=0)
-prec_micro, rec_micro, f1_micro, _ = precision_recall_fscore_support(y_true, y_pred, average='micro',  zero_division=0)
-prec_w, rec_w, f1_w, _ = precision_recall_fscore_support(y_true, y_pred, average='weighted', zero_division=0)
+detailed_classification_report = detailed_classification_summary(
+    true_labels_array,
+    predicted_labels_array,
+    digits=4,
+    zero_division=0
+)
+print("\nDetailed Classification Report:")
+print(detailed_classification_report)
 
-print("\n=== Detailed Metrics ===")
-print(f"Precision (macro): {prec_macro:.4f} | Recall (macro): {rec_macro:.4f} | F1 (macro): {f1_macro:.4f}")
-print(f"Precision (micro): {prec_micro:.4f} | Recall (micro): {rec_micro:.4f} | F1 (micro): {f1_micro:.4f}")
-print(f"Precision (wgt)  : {prec_w:.4f} | Recall (wgt)  : {rec_w:.4f} | F1 (wgt)  : {f1_w:.4f}")
+# Comprehensive Report Export
+comprehensive_report_output_path = os.path.join(PERFORMANCE_OUTPUT_DIRECTORY, "DT_Classification_Report.txt")
+with open(comprehensive_report_output_path, "w") as report_file_handle:
+    report_file_handle.write("="*60 + "\n")
+    report_file_handle.write("Decision Tree Classification Comprehensive Report\n")
+    report_file_handle.write("="*60 + "\n\n")
+    report_file_handle.write("Performance Metrics Summary:\n")
+    report_file_handle.write(performance_results_table.to_string(index=False))
+    report_file_handle.write("\n\n" + "="*60 + "\n")
+    report_file_handle.write("Detailed Metrics Breakdown:\n")
+    report_file_handle.write("="*60 + "\n")
+    report_file_handle.write(f"Macro Precision: {macro_precision_avg:.4f} | Macro Recall: {macro_recall_avg:.4f} | Macro F1: {macro_f1_avg:.4f}\n")
+    report_file_handle.write(f"Micro Precision: {micro_precision_avg:.4f} | Micro Recall: {micro_recall_avg:.4f} | Micro F1: {micro_f1_avg:.4f}\n")
+    report_file_handle.write(f"Weighted Precision: {weighted_precision_avg:.4f} | Weighted Recall: {weighted_recall_avg:.4f} | Weighted F1: {weighted_f1_avg:.4f}\n")
+    report_file_handle.write("\n" + "="*60 + "\n")
+    report_file_handle.write("Sklearn Classification Report:\n")
+    report_file_handle.write("="*60 + "\n")
+    report_file_handle.write(detailed_classification_report)
 
-print("\nClassification Report:")
-print(classification_report(y_true, y_pred, digits=4, zero_division=0))
+print(f"\nComprehensive report exported: {comprehensive_report_output_path}")
 
-# Save report
-with open(os.path.join(results_dir, "DT_Classification_Report.txt"), "w") as f:
-    f.write("Decision Tree Classification Report\n")
-    f.write(results_df.to_string(index=False))
-    f.write("\n\nDetailed Classification Report:\n")
-    f.write(classification_report(y_true, y_pred, digits=4, zero_division=0))
+
