@@ -31,15 +31,14 @@ spark = SparkSession.builder.appName("NBA_DT_Classification").getOrCreate()
 # ---------------------------------------------------------
 # Load Dataset
 # ---------------------------------------------------------
-data_path = "/content/discretized_nba_stats/discretized_nba_stats/part-*.csv"
+data_path = "/home/sat3812/discretized_nba_stats/part-*.csv"
 nba_data = spark.read.csv(data_path, header=True, inferSchema=True)
 print(f"Dataset loaded: {nba_data.count()} rows, {len(nba_data.columns)} columns")
 
 # ---------------------------------------------------------
 # Results Directory Setup
 # ---------------------------------------------------------
-timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-results_dir = f"/home/sat3812/BD_Project/Results/DecisionTree_{timestamp}"
+results_dir = f"/home/sat3812/BD_Project/Codes/Models/Visualizations"
 os.makedirs(results_dir, exist_ok=True)
 print(f"Results will be saved in: {results_dir}")
 
@@ -90,7 +89,7 @@ if average_per is not None:
     plt.title(f"{target} Distribution", fontsize=14, weight='bold')
     plt.xlabel(target); plt.ylabel("Count"); plt.legend()
     plt.tight_layout()
-    plt.savefig(os.path.join(results_dir, "PER_Distribution.png"))
+    plt.savefig(os.path.join(results_dir, "PER_Distribution_DT.png"))
     plt.close()
 
 # =========================================================
@@ -141,7 +140,7 @@ results_df = pd.DataFrame(results)
 results_df["Training_Time(s)"] = training_time
 
 print("\nClassification Performance:")
-print(results_df.round(3))
+print(results_df.to_string(index=False,justify='center'))
 
 results_df.to_csv(os.path.join(results_dir, "DT_Classification_Results.csv"), index=False)
 
@@ -154,7 +153,7 @@ disp = ConfusionMatrixDisplay(confusion_matrix=cm)
 disp.plot(cmap="Blues")
 plt.title("Decision Tree Classification — Confusion Matrix", fontsize=14, weight='bold')
 plt.tight_layout()
-plt.savefig(os.path.join(results_dir, "Confusion_Matrix.png"))
+plt.savefig(os.path.join(results_dir, "Confusion_Matrix_DT.png"))
 plt.close()
 
 # =========================================================
@@ -176,7 +175,7 @@ try:
     plt.title("ROC Curve — Decision Tree")
     plt.legend(loc="lower right")
     plt.tight_layout()
-    plt.savefig(os.path.join(results_dir, "ROC_Curve.png"))
+    plt.savefig(os.path.join(results_dir, "ROC_Curve_DT.png"))
     plt.close()
 
     plt.figure(figsize=(7,5))
@@ -185,7 +184,7 @@ try:
     plt.title("Precision–Recall Curve — Decision Tree")
     plt.legend(loc="lower left")
     plt.tight_layout()
-    plt.savefig(os.path.join(results_dir, "Precision_Recall_Curve.png"))
+    plt.savefig(os.path.join(results_dir, "Precision_Recall_Curve_DT.png"))
     plt.close()
 
 except Exception as e:
@@ -215,4 +214,3 @@ with open(os.path.join(results_dir, "DT_Classification_Report.txt"), "w") as f:
     f.write(results_df.to_string(index=False))
     f.write("\n\nDetailed Classification Report:\n")
     f.write(classification_report(y_true, y_pred, digits=4, zero_division=0))
-
