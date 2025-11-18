@@ -1,39 +1,44 @@
-# ================== SINGLE-CELL PySpark + CNN FOR INTEL 6-CLASS DATA ==================
+# ================== SINGLE-CELL PySpark + CNN FOR INTEL (3 CLASSES) ==================
 
 import os, time, numpy as np, tensorflow as tf, matplotlib.pyplot as plt
 from pyspark.sql import SparkSession
 from sklearn.metrics import classification_report, confusion_matrix
 import itertools
 
-# ---------------------- 1. Start Timers ----------------------
-script_start = time.time()
+# ---------------------- 1. Timer ----------------------
+start_time = time.time()
 
-# ---------------------- 2. Start Spark -----------------------
+# ---------------------- 2. Spark Session ----------------------
 spark = SparkSession.builder \
-    .appName("Spark_CNN_IntelSceneClassification") \
+    .appName("Spark_CNN_Intel_3Class") \
     .master("local[*]") \
     .config("spark.driver.memory","4g") \
     .getOrCreate()
 
 print("Spark Started:", spark.sparkContext.master)
 
-# ---------------------- 3. Load Intel Dataset ----------------------
-# Path example: /home/youruser/IntelDataset/seg_train/
-data_path = "/home/sat3812/IntelDataset/seg_train"  # <<< CHANGE THIS TO YOUR PATH
+# ---------------------- 3. Dataset Path ----------------------
+# CHANGE THIS TO YOUR DATASET FOLDER
+data_path = "/home/sat3812/IntelDataset/seg_train"
+
+# Only load 3 specific folders
+SELECTED_CLASSES = ["buildings", "forest", "sea"]
 
 df = spark.read.format("binaryFile") \
     .option("recursiveFileLookup", "true") \
     .load(data_path)
 
-# Extract real paths
+# Extract paths only from selected folders
 def extract_paths(df):
-    paths = []
+    valid = []
     for row in df.select("path").collect():
         p = row.path.replace("file:", "") if row.path.startswith("file:") else row.path
-        paths.append(p)
-    return paths
+        for c in SELECTED_CLASSES:
+            if f"/{c}/" in p.lower():
+                valid.append(p)
+    return valid
 
-# Create train/val/test via Spark split
+# Split into train/val/test
 train_df, val_df, test_df = df.randomSplit([0.70, 0.15, 0.15], seed=42)
 
 train_files = np.array(extract_paths(train_df), dtype=str)
@@ -43,18 +48,16 @@ test_files  = np.array(extract_paths(test_df), dtype=str)
 print("Train:", len(train_files), "Val:", len(val_files), "Test:", len(test_files))
 
 # ---------------------- 4. Output Folder ----------------------
-OUTPUT_DIR = os.path.join(os.getcwd(), "outputs_intel")
+OUTPUT_DIR = os.path.join(os.getcwd(), "outputs_intel3")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-print("Outputs will be saved in:", OUTPUT_DIR)
+print("Outputs saved in:", OUTPUT_DIR)
 
 # ---------------------- 5. TF Dataset Pipeline ----------------------
 IMG_SIZE = (128, 128)
-AUTOTUNE = tf.data.AUTOTUNE
 BATCH = 32
+AUTOTUNE = tf.data.AUTOTUNE
 
-# Map folder names to integer labels
-CLASS_NAMES = ["buildings", "forest", "glacier", "mountain", "sea", "street"]
-CLASS_TO_ID = {name: i for i, name in enumerate(CLASS_NAMES)}
+CLASS_TO_ID = {c: i for i, c in enumerate(SELECTED_CLASSES)}
 
 def load_image(path):
     img = tf.io.read_file(path)
@@ -64,10 +67,10 @@ def load_image(path):
 
 def get_label(path):
     p = path.numpy().decode("utf-8").lower()
-    for class_name in CLASS_NAMES:
-        if class_name in p:
-            return CLASS_TO_ID[class_name]
-    return -1
+    for cname in SELECTED_CLASSES:
+        if f"/{cname}/" in p:
+            return CLASS_TO_ID[cname]
+    return -1  # safety fallback
 
 def load_pair(path):
     img = load_image(path)
@@ -75,28 +78,28 @@ def load_pair(path):
     lbl.set_shape([])
     return img, lbl
 
-train_ds = tf.data.Dataset.from_tensor_slices(train_files).shuffle(10000) \
-    .map(load_pair, num_parallel_calls=AUTOTUNE).batch(BATCH).prefetch(AUTOTUNE)
+def make_ds(files, training=False):
+    ds = tf.data.Dataset.from_tensor_slices(files)
+    if training:
+        ds = ds.shuffle(5000)
+    ds = ds.map(load_pair, num_parallel_calls=AUTOTUNE).batch(BATCH).prefetch(AUTOTUNE)
+    return ds
 
-val_ds = tf.data.Dataset.from_tensor_slices(val_files) \
-    .map(load_pair, num_parallel_calls=AUTOTUNE).batch(BATCH).prefetch(AUTOTUNE)
+train_ds = make_ds(train_files, training=True)
+val_ds   = make_ds(val_files)
+test_ds  = make_ds(test_files)
 
-test_ds = tf.data.Dataset.from_tensor_slices(test_files) \
-    .map(load_pair, num_parallel_calls=AUTOTUNE).batch(BATCH).prefetch(AUTOTUNE)
-
-# ---------------------- 6. Sample Images ----------------------
+# ---------------------- 6. Save Sample Images ----------------------
 plt.figure(figsize=(10,6))
 for i, (img, lbl) in enumerate(train_ds.take(6)):
     plt.subplot(2,3,i+1)
     plt.imshow(img[0].numpy())
-    plt.title(CLASS_NAMES[lbl[0].numpy()])
+    plt.title(SELECTED_CLASSES[lbl[0].numpy()])
     plt.axis("off")
 plt.tight_layout()
 plt.savefig(os.path.join(OUTPUT_DIR, "sample_images.png"))
 
-# ---------------------- 7. Build CNN ----------------------
-num_classes = len(CLASS_NAMES)
-
+# ---------------------- 7. Build CNN Model ----------------------
 inputs = tf.keras.Input(shape=(128,128,3))
 x = tf.keras.layers.Conv2D(32,3,activation="relu",padding="same")(inputs)
 x = tf.keras.layers.MaxPooling2D()(x)
@@ -107,11 +110,17 @@ x = tf.keras.layers.MaxPooling2D()(x)
 x = tf.keras.layers.Flatten()(x)
 x = tf.keras.layers.Dense(256,activation="relu")(x)
 x = tf.keras.layers.Dropout(0.4)(x)
-outputs = tf.keras.layers.Dense(num_classes,activation="softmax")(x)
+outputs = tf.keras.layers.Dense(3,activation="softmax")(x)
 
 model = tf.keras.Model(inputs, outputs)
-model.compile(optimizer="adam", loss="sparse_categorical_crossentropy", metrics=["accuracy"])
 
+model.compile(
+    optimizer="adam",
+    loss="sparse_categorical_crossentropy",
+    metrics=["accuracy"]
+)
+
+# Save summary
 with open(os.path.join(OUTPUT_DIR, "model_summary.txt"), "w") as f:
     model.summary(print_fn=lambda line: f.write(line + "\n"))
 
@@ -122,14 +131,20 @@ train_start = time.time()
 early_stop = tf.keras.callbacks.EarlyStopping(patience=5, restore_best_weights=True)
 history = model.fit(train_ds, validation_data=val_ds, epochs=20, callbacks=[early_stop])
 
-training_time = time.time() - train_start
+train_time = time.time() - train_start
 with open(os.path.join(OUTPUT_DIR, "training_time.txt"), "w") as f:
-    f.write(str(training_time))
+    f.write(str(train_time))
 
-# ---------------------- 9. Training Plots ----------------------
+# ---------------------- 9. Training Performance Plots ----------------------
 plt.figure(figsize=(14,5))
-plt.subplot(1,2,1); plt.plot(history.history["accuracy"]); plt.plot(history.history["val_accuracy"]); plt.title("Accuracy")
-plt.subplot(1,2,2); plt.plot(history.history["loss"]); plt.plot(history.history["val_loss"]); plt.title("Loss")
+plt.subplot(1,2,1)
+plt.plot(history.history["accuracy"])
+plt.plot(history.history["val_accuracy"])
+plt.title("Accuracy")
+plt.subplot(1,2,2)
+plt.plot(history.history["loss"])
+plt.plot(history.history["val_loss"])
+plt.title("Loss")
 plt.savefig(os.path.join(OUTPUT_DIR, "training_curves.png"))
 
 # ---------------------- 10. Test Evaluation ----------------------
@@ -137,28 +152,28 @@ test_loss, test_acc = model.evaluate(test_ds)
 with open(os.path.join(OUTPUT_DIR, "test_metrics.txt"), "w") as f:
     f.write(f"Accuracy: {test_acc}\nLoss: {test_loss}")
 
-# ---------------------- 11. Classification Report/Confusion Matrix ----------------------
+# ---------------------- 11. Confusion Matrix & Report ----------------------
 y_true, y_pred = [], []
 for imgs, lbls in test_ds:
     preds = model.predict(imgs)
-    y_pred.extend(np.argmax(preds, axis=1))
     y_true.extend(lbls.numpy())
+    y_pred.extend(np.argmax(preds, axis=1))
 
-report = classification_report(y_true, y_pred, target_names=CLASS_NAMES)
+report = classification_report(y_true, y_pred, target_names=SELECTED_CLASSES)
 with open(os.path.join(OUTPUT_DIR, "classification_report.txt"), "w") as f:
     f.write(report)
 
+# Confusion Matrix
 cm = confusion_matrix(y_true, y_pred)
 plt.figure(figsize=(7,6))
-plt.imshow(cm, cmap="Blues"); plt.colorbar(); plt.title("Confusion Matrix")
-for i in range(num_classes):
-    for j in range(num_classes):
-        plt.text(j, i, cm[i,j], ha="center", color="white" if cm[i,j]>cm.max()/2 else "black")
+plt.imshow(cm, cmap="Oranges")
+plt.title("Confusion Matrix")
+plt.colorbar()
+for i in range(3):
+    for j in range(3):
+        plt.text(j, i, cm[i, j], ha="center")
 plt.savefig(os.path.join(OUTPUT_DIR, "confusion_matrix.png"))
 
 # ---------------------- 12. Stop Spark ----------------------
 spark.stop()
-
-print(f"\nTotal Runtime: {time.time() - script_start:.2f} sec")
-
-# ================== END OF SCRIPT ==================
+print("\nTotal Runtime:", time.time() - start_time, "seconds")
