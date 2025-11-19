@@ -17,7 +17,7 @@ spark = SparkSession.builder \
 print("Spark Started:", spark.sparkContext.master)
 
 # ------------------ 2. LOAD DATASET ------------------
-DATA_ROOT = "/home/sat3812/FoodDataset"   
+DATA_ROOT = "/home/sat3812/food-cl"   
 CLASSES = ["meal", "drink", "dessert"]
 
 file_paths = []
