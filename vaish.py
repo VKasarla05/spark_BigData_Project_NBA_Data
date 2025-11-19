@@ -1,4 +1,4 @@
-# ================== SINGLE-CELL PySpark + CNN FOR INTEL (3 CLASSES) ==================
+# ================== PySpark + CNN FOR INTEL (3 CLASSES) ==================
 
 import os, time, numpy as np, tensorflow as tf, matplotlib.pyplot as plt
 from pyspark.sql import SparkSession
