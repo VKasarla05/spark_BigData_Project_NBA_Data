@@ -1,5 +1,3 @@
-# ================== PySpark + CNN FOR INTEL (3 CLASSES) ==================
-
 import os, time, numpy as np, tensorflow as tf, matplotlib.pyplot as plt
 from pyspark.sql import SparkSession
 from sklearn.metrics import classification_report, confusion_matrix
